@@ -7,13 +7,17 @@ on:
 jobs:
   build-ios:
     runs-on: macos-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Flutter
+      - name: Install Flutter
         run: |
-          git clone https://github.com/flutter/flutter.git -b stable --depth 1
+          curl -o flutter.tar.xz https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_3.24.0-stable.tar.xz
+          tar xf flutter.tar.xz
           echo "$GITHUB_WORKSPACE/flutter/bin" >> $GITHUB_PATH
+          flutter --version
 
       - name: Install dependencies
         run: flutter pub get
