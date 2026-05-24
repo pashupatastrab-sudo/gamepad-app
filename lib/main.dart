@@ -40,8 +40,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
   int _ping = 0;
   Color _lightbarColor = Colors.green;
   DateTime? _pingSentAt;
+  double _gyroSmoothed = 0.0;
 
-  // Button states
   Map<String, bool> _buttons = {
     'cross': false, 'circle': false, 'square': false, 'triangle': false,
     'l1': false, 'r1': false, 'options': false,
@@ -55,8 +55,6 @@ class _ControllerScreenState extends State<ControllerScreen> {
   StreamSubscription? _gyroSub;
   Timer? _sendTimer;
   Timer? _pingTimer;
-  Timer? _l2Timer1, _l2Timer2;
-  Timer? _r2Timer1, _r2Timer2;
 
   void _connect() {
     final ip = _ipController.text.trim();
@@ -114,9 +112,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
   void _startGyroscope() {
     _gyroSub = gyroscopeEventStream().listen((event) {
       if (!_gyroEnabled) return;
+      final raw = (event.y / 3.0).clamp(-1.0, 1.0);
+      _gyroSmoothed = _gyroSmoothed * 0.7 + raw * 0.3;
       setState(() {
-        _rx = (event.y / 5.0).clamp(-1.0, 1.0);
-        _ry = (event.x / 5.0).clamp(-1.0, 1.0);
+        _lx = _gyroSmoothed;
       });
     });
   }
@@ -140,26 +139,12 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   void _onTriggerDown(bool isLeft) {
-    setState(() => isLeft ? _l2 = 0.3 : _r2 = 0.3);
-    Haptics.vibrate(HapticsType.light);
-
-    final t1 = Timer(const Duration(milliseconds: 500), () {
-      setState(() => isLeft ? _l2 = 0.6 : _r2 = 0.6);
-      Haptics.vibrate(HapticsType.medium);
-    });
-    final t2 = Timer(const Duration(milliseconds: 1000), () {
-      setState(() => isLeft ? _l2 = 1.0 : _r2 = 1.0);
-      Haptics.vibrate(HapticsType.heavy);
-    });
-
-    if (isLeft) { _l2Timer1 = t1; _l2Timer2 = t2; }
-    else { _r2Timer1 = t1; _r2Timer2 = t2; }
+    setState(() => isLeft ? _l2 = 1.0 : _r2 = 1.0);
+    Haptics.vibrate(HapticsType.medium);
   }
 
   void _onTriggerRelease(bool isLeft) {
-    if (isLeft) { _l2Timer1?.cancel(); _l2Timer2?.cancel(); setState(() => _l2 = 0); }
-    else { _r2Timer1?.cancel(); _r2Timer2?.cancel(); setState(() => _r2 = 0); }
-    Haptics.vibrate(HapticsType.selection);
+    setState(() => isLeft ? _l2 = 0.0 : _r2 = 0.0);
   }
 
   void _disconnect() {
@@ -192,41 +177,46 @@ class _ControllerScreenState extends State<ControllerScreen> {
   Widget _buildConnectScreen() {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('🎮 GamePad', style: TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              const Text('Enter your PC IP address', style: TextStyle(color: Colors.grey)),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _ipController,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'e.g. 192.168.29.171',
-                  labelStyle: TextStyle(color: Colors.grey),
-                  border: OutlineInputBorder(),
-                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-                ),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          left: 32, right: 32, top: 32,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 32,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 40),
+            const Text('🎮 GamePad',
+              style: TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Enter your PC IP address',
+              style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _ipController,
+              style: const TextStyle(color: Colors.white),
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'e.g. 192.168.29.171',
+                labelStyle: TextStyle(color: Colors.grey),
+                border: OutlineInputBorder(),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.grey)),
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _connect,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('Connect', style: TextStyle(fontSize: 16)),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _connect,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
+                child: const Text('Connect', style: TextStyle(fontSize: 16)),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -240,10 +230,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
           // Lightbar
           Positioned(
             top: 0, left: 0, right: 0,
-            child: Container(
-              height: 4,
-              color: _lightbarColor,
-            ),
+            child: Container(height: 4, color: _lightbarColor),
           ),
 
           // Top bar
@@ -259,7 +246,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: _pingColor.withOpacity(0.4)),
                   ),
-                  child: Text('$_ping ms', style: TextStyle(color: _pingColor, fontSize: 11)),
+                  child: Text('$_ping ms',
+                    style: TextStyle(color: _pingColor, fontSize: 11)),
                 ),
                 const SizedBox(width: 10),
                 _buildSmallButton('options', 'OPTIONS'),
@@ -267,18 +255,24 @@ class _ControllerScreenState extends State<ControllerScreen> {
                 GestureDetector(
                   onTap: () => setState(() {
                     _gyroEnabled = !_gyroEnabled;
-                    if (!_gyroEnabled) { _rx = 0; _ry = 0; }
+                    if (!_gyroEnabled) {
+                      _lx = 0.0;
+                      _gyroSmoothed = 0.0;
+                    }
                   }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: (_gyroEnabled ? Colors.green : Colors.grey).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _gyroEnabled ? Colors.green : Colors.grey),
+                      border: Border.all(
+                        color: _gyroEnabled ? Colors.green : Colors.grey),
                     ),
                     child: Text(
                       _gyroEnabled ? '🌀 Gyro ON' : '🌀 Gyro OFF',
-                      style: TextStyle(color: _gyroEnabled ? Colors.green : Colors.grey, fontSize: 11),
+                      style: TextStyle(
+                        color: _gyroEnabled ? Colors.green : Colors.grey,
+                        fontSize: 11),
                     ),
                   ),
                 ),
@@ -330,7 +324,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
             child: Center(
               child: TextButton(
                 onPressed: _disconnect,
-                child: const Text('Disconnect', style: TextStyle(color: Colors.red, fontSize: 11)),
+                child: const Text('Disconnect',
+                  style: TextStyle(color: Colors.red, fontSize: 11)),
               ),
             ),
           ),
@@ -341,34 +336,22 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   Widget _buildTrigger(bool isLeft) {
     final value = isLeft ? _l2 : _r2;
-    Color color = value >= 1.0 ? Colors.orange : value >= 0.6 ? Colors.yellow : value >= 0.3 ? Colors.yellow.withOpacity(0.6) : Colors.white24;
+    Color color = value > 0 ? Colors.orange : Colors.white24;
     return GestureDetector(
       onTapDown: (_) => _onTriggerDown(isLeft),
       onTapUp: (_) => _onTriggerRelease(isLeft),
       onTapCancel: () => _onTriggerRelease(isLeft),
       child: Container(
-        width: 64, height: 52,
+        width: 64, height: 48,
         decoration: BoxDecoration(
           color: color.withOpacity(0.2),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: color, width: 2),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(isLeft ? 'L2' : 'R2', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 3),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: LinearProgressIndicator(
-                value: value,
-                backgroundColor: Colors.white10,
-                valueColor: AlwaysStoppedAnimation(color),
-                minHeight: 4,
-              ),
-            ),
-            Text('${(value * 100).toInt()}%', style: const TextStyle(color: Colors.white54, fontSize: 9)),
-          ],
+        child: Center(
+          child: Text(isLeft ? 'L2' : 'R2',
+            style: const TextStyle(color: Colors.white,
+              fontSize: 13, fontWeight: FontWeight.bold)),
         ),
       ),
     );
@@ -376,7 +359,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   Widget _buildShoulderBtn(String key, String label) {
     return GestureDetector(
-      onTapDown: (_) { setState(() => _buttons[key] = true); Haptics.vibrate(HapticsType.light); },
+      onTapDown: (_) {
+        setState(() => _buttons[key] = true);
+        Haptics.vibrate(HapticsType.light);
+      },
       onTapUp: (_) => setState(() => _buttons[key] = false),
       onTapCancel: () => setState(() => _buttons[key] = false),
       child: Container(
@@ -386,7 +372,11 @@ class _ControllerScreenState extends State<ControllerScreen> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.white30),
         ),
-        child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))),
+        child: Center(
+          child: Text(label,
+            style: const TextStyle(color: Colors.white,
+              fontSize: 13, fontWeight: FontWeight.bold)),
+        ),
       ),
     );
   }
@@ -408,7 +398,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   Widget _buildFaceBtn(String key, String label, Color color) {
     return GestureDetector(
-      onTapDown: (_) { setState(() => _buttons[key] = true); Haptics.vibrate(HapticsType.light); },
+      onTapDown: (_) {
+        setState(() => _buttons[key] = true);
+        Haptics.vibrate(HapticsType.light);
+      },
       onTapUp: (_) => setState(() => _buttons[key] = false),
       onTapCancel: () => setState(() => _buttons[key] = false),
       child: Container(
@@ -418,14 +411,21 @@ class _ControllerScreenState extends State<ControllerScreen> {
           color: _buttons[key]! ? color.withOpacity(0.5) : color.withOpacity(0.15),
           border: Border.all(color: color, width: 2),
         ),
-        child: Center(child: Text(label, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold))),
+        child: Center(
+          child: Text(label,
+            style: TextStyle(color: color,
+              fontSize: 20, fontWeight: FontWeight.bold)),
+        ),
       ),
     );
   }
 
   Widget _buildSmallButton(String key, String label) {
     return GestureDetector(
-      onTapDown: (_) { setState(() => _buttons[key] = true); Haptics.vibrate(HapticsType.light); },
+      onTapDown: (_) {
+        setState(() => _buttons[key] = true);
+        Haptics.vibrate(HapticsType.light);
+      },
       onTapUp: (_) => setState(() => _buttons[key] = false),
       onTapCancel: () => setState(() => _buttons[key] = false),
       child: Container(
@@ -435,7 +435,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.white30),
         ),
-        child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 11)),
+        child: Text(label,
+          style: const TextStyle(color: Colors.white, fontSize: 11)),
       ),
     );
   }
@@ -456,7 +457,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   Widget _buildDpadBtn(String key, String label) {
     return GestureDetector(
-      onTapDown: (_) { setState(() => _buttons[key] = true); Haptics.vibrate(HapticsType.light); },
+      onTapDown: (_) {
+        setState(() => _buttons[key] = true);
+        Haptics.vibrate(HapticsType.light);
+      },
       onTapUp: (_) => setState(() => _buttons[key] = false),
       onTapCancel: () => setState(() => _buttons[key] = false),
       child: Container(
@@ -466,7 +470,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: Colors.white24),
         ),
-        child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14))),
+        child: Center(
+          child: Text(label,
+            style: const TextStyle(color: Colors.white, fontSize: 14)),
+        ),
       ),
     );
   }
@@ -474,19 +481,21 @@ class _ControllerScreenState extends State<ControllerScreen> {
   Widget _buildJoystick(bool isLeft) {
     return GestureDetector(
       onPanUpdate: (details) {
-        setState(() {
-          if (isLeft) {
+        if (isLeft && !_gyroEnabled) {
+          setState(() {
             _lx = ((details.localPosition.dx - 55) / 55).clamp(-1.0, 1.0);
             _ly = ((details.localPosition.dy - 55) / 55).clamp(-1.0, 1.0);
-          } else {
+          });
+        } else if (!isLeft) {
+          setState(() {
             _rx = ((details.localPosition.dx - 55) / 55).clamp(-1.0, 1.0);
             _ry = ((details.localPosition.dy - 55) / 55).clamp(-1.0, 1.0);
-          }
-        });
+          });
+        }
       },
       onPanEnd: (_) => setState(() {
-        if (isLeft) { _lx = 0; _ly = 0; }
-        else { _rx = 0; _ry = 0; }
+        if (isLeft && !_gyroEnabled) { _lx = 0; _ly = 0; }
+        else if (!isLeft) { _rx = 0; _ry = 0; }
       }),
       child: Container(
         width: 110, height: 110,
