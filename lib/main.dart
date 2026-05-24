@@ -9,7 +9,6 @@ import 'dart:async';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft]);
   WakelockPlus.enable();
   runApp(const GamepadApp());
 }
