@@ -42,6 +42,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
   final TextEditingController _ipController = TextEditingController();
   bool _connected = false;
   bool _gyroEnabled = true;
+  bool _invertSteering = false;
   bool _editMode = false;
   String? _selectedElement;
   int _ping = 0;
@@ -144,8 +145,24 @@ class _ControllerScreenState extends State<ControllerScreen> {
   void _startSteering() {
     _gyroSub = accelerometerEventStream().listen((event) {
       if (!_gyroEnabled) return;
-      final raw = (-event.x / 9.8).clamp(-1.0, 1.0);
-      _gyroSmoothed = _gyroSmoothed * 0.7 + raw * 0.3;
+
+      // Detect phone orientation using y axis
+      // Normal landscape: event.y near 0
+      // Rotated 180 degrees: event.y flips positive
+      final isUpsideDown = event.y > 5.0;
+
+      double raw;
+      if (isUpsideDown) {
+        raw = (event.x / 9.8).clamp(-1.0, 1.0);
+      } else {
+        raw = (-event.x / 9.8).clamp(-1.0, 1.0);
+      }
+
+      // Apply invert toggle
+      if (_invertSteering) raw = -raw;
+
+      // Smooth it out
+      _gyroSmoothed = _gyroSmoothed * 0.75 + raw * 0.25;
       setState(() => _lx = _gyroSmoothed);
     });
   }
@@ -195,7 +212,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
     _wsSubscription?.cancel();
     _rumbleCooldown?.cancel();
     _channel?.sink.close();
-    setState(() => _connected = false);
+    setState(() {
+      _connected = false;
+      _editMode = false;
+    });
   }
 
   @override
@@ -283,118 +303,151 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
               // All draggable elements
               ..._layouts.entries.map((entry) {
-                final key = entry.key;
-                final layout = entry.value;
-                return _buildDraggable(key, layout, w, h);
+                return _buildDraggable(entry.key, entry.value, w, h);
               }),
 
               // TOP CENTER BAR
               Positioned(
                 top: 8, left: 0, right: 0,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Ping
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _pingColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: _pingColor.withOpacity(0.4)),
-                      ),
-                      child: Text('$_ping ms',
-                        style: TextStyle(
-                          color: _pingColor, fontSize: 10)),
-                    ),
-                    const SizedBox(width: 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(width: 8),
 
-                    // Gyro toggle
-                    GestureDetector(
-                      onTap: () => setState(() {
-                        _gyroEnabled = !_gyroEnabled;
-                        if (!_gyroEnabled) {
-                          _lx = 0.0;
-                          _gyroSmoothed = 0.0;
-                        }
-                      }),
-                      child: Container(
+                      // Ping
+                      Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: (_gyroEnabled
-                            ? Colors.green : Colors.grey).withOpacity(0.15),
+                          color: _pingColor.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: _gyroEnabled
-                              ? Colors.green : Colors.grey),
+                            color: _pingColor.withOpacity(0.4)),
                         ),
-                        child: Text(
-                          _gyroEnabled ? '🌀 ON' : '🌀 OFF',
+                        child: Text('$_ping ms',
                           style: TextStyle(
-                            color: _gyroEnabled
-                              ? Colors.green : Colors.grey,
-                            fontSize: 10),
-                        ),
+                            color: _pingColor, fontSize: 10)),
                       ),
-                    ),
-                    const SizedBox(width: 8),
+                      const SizedBox(width: 6),
 
-                    // ★ EDIT BUTTON ★
-                    GestureDetector(
-                      onTap: () => setState(() {
-                        _editMode = !_editMode;
-                        _selectedElement = null;
-                      }),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _editMode
-                            ? Colors.orange.withOpacity(0.3)
-                            : Colors.white10,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: _editMode
-                              ? Colors.orange : Colors.white30,
-                            width: 2),
-                        ),
-                        child: Text(
-                          _editMode ? '✅ DONE' : '✏️ EDIT',
-                          style: TextStyle(
-                            color: _editMode
-                              ? Colors.orange : Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-
-                    // Reset button (only in edit mode)
-                    if (_editMode)
+                      // Gyro toggle
                       GestureDetector(
-                        onTap: () => setState(() => _resetLayouts()),
+                        onTap: () => setState(() {
+                          _gyroEnabled = !_gyroEnabled;
+                          if (!_gyroEnabled) {
+                            _lx = 0.0;
+                            _gyroSmoothed = 0.0;
+                          }
+                        }),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.2),
+                            color: (_gyroEnabled
+                              ? Colors.green : Colors.grey)
+                                .withOpacity(0.15),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: Colors.red.withOpacity(0.5)),
+                              color: _gyroEnabled
+                                ? Colors.green : Colors.grey),
                           ),
-                          child: const Text('↩ RESET',
+                          child: Text(
+                            _gyroEnabled ? '🌀 ON' : '🌀 OFF',
                             style: TextStyle(
-                              color: Colors.red, fontSize: 10)),
+                              color: _gyroEnabled
+                                ? Colors.green : Colors.grey,
+                              fontSize: 10),
+                          ),
                         ),
                       ),
-                  ],
+                      const SizedBox(width: 6),
+
+                      // Invert steering
+                      GestureDetector(
+                        onTap: () => setState(() =>
+                          _invertSteering = !_invertSteering),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _invertSteering
+                              ? Colors.purple.withOpacity(0.3)
+                              : Colors.white10,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _invertSteering
+                                ? Colors.purple : Colors.white30),
+                          ),
+                          child: Text(
+                            _invertSteering ? '🔄 INV ON' : '🔄 INV',
+                            style: TextStyle(
+                              color: _invertSteering
+                                ? Colors.purple : Colors.white54,
+                              fontSize: 10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+
+                      // Edit button
+                      GestureDetector(
+                        onTap: () => setState(() {
+                          _editMode = !_editMode;
+                          _selectedElement = null;
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _editMode
+                              ? Colors.orange.withOpacity(0.3)
+                              : Colors.white10,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _editMode
+                                ? Colors.orange : Colors.white30,
+                              width: 2),
+                          ),
+                          child: Text(
+                            _editMode ? '✅ DONE' : '✏️ EDIT',
+                            style: TextStyle(
+                              color: _editMode
+                                ? Colors.orange : Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+
+                      // Reset (only in edit mode)
+                      if (_editMode)
+                        GestureDetector(
+                          onTap: () => setState(() => _resetLayouts()),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.red.withOpacity(0.5)),
+                            ),
+                            child: const Text('↩ RESET',
+                              style: TextStyle(
+                                color: Colors.red, fontSize: 10)),
+                          ),
+                        ),
+
+                      const SizedBox(width: 8),
+                    ],
+                  ),
                 ),
               ),
 
-              // Size slider (shown when element selected in edit mode)
+              // Size slider when element selected
               if (_editMode && _selectedElement != null)
                 Positioned(
                   bottom: 40, left: 20, right: 20,
@@ -404,7 +457,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
                     decoration: BoxDecoration(
                       color: Colors.black87,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                      border: Border.all(
+                        color: Colors.orange.withOpacity(0.5)),
                     ),
                     child: Row(
                       children: [
@@ -414,7 +468,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
                             color: Colors.orange, fontSize: 11)),
                         const SizedBox(width: 8),
                         const Text('S',
-                          style: TextStyle(color: Colors.white, fontSize: 11)),
+                          style: TextStyle(
+                            color: Colors.white, fontSize: 11)),
                         Expanded(
                           child: Slider(
                             value: _layouts[_selectedElement!]!.size,
@@ -427,25 +482,14 @@ class _ControllerScreenState extends State<ControllerScreen> {
                           ),
                         ),
                         const Text('L',
-                          style: TextStyle(color: Colors.white, fontSize: 11)),
+                          style: TextStyle(
+                            color: Colors.white, fontSize: 11)),
                       ],
                     ),
                   ),
                 ),
 
-              // Disconnect
-              Positioned(
-                bottom: 6, left: 0, right: 0,
-                child: Center(
-                  child: TextButton(
-                    onPressed: _disconnect,
-                    child: const Text('Disconnect',
-                      style: TextStyle(color: Colors.red, fontSize: 10)),
-                  ),
-                ),
-              ),
-
-              // Edit mode overlay hint
+              // Edit hint
               if (_editMode)
                 Positioned(
                   bottom: 60, left: 0, right: 0,
@@ -459,11 +503,24 @@ class _ControllerScreenState extends State<ControllerScreen> {
                       ),
                       child: const Text(
                         'Drag to move • Tap to select • Slider to resize',
-                        style: TextStyle(color: Colors.orange, fontSize: 10),
-                      ),
+                        style: TextStyle(
+                          color: Colors.orange, fontSize: 10)),
                     ),
                   ),
                 ),
+
+              // Disconnect
+              Positioned(
+                bottom: 6, left: 0, right: 0,
+                child: Center(
+                  child: TextButton(
+                    onPressed: _disconnect,
+                    child: const Text('Disconnect',
+                      style: TextStyle(
+                        color: Colors.red, fontSize: 10)),
+                  ),
+                ),
+              ),
             ],
           );
         },
@@ -473,7 +530,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   Widget _buildDraggable(
       String key, ButtonLayout layout, double w, double h) {
-    final widget = _buildElement(key, layout.size);
+    final element = _buildElement(key, layout.size);
     final isSelected = _selectedElement == key;
 
     return Positioned(
@@ -496,15 +553,16 @@ class _ControllerScreenState extends State<ControllerScreen> {
               decoration: BoxDecoration(
                 border: Border.all(
                   color: isSelected
-                    ? Colors.orange : Colors.orange.withOpacity(0.4),
+                    ? Colors.orange
+                    : Colors.orange.withOpacity(0.4),
                   width: isSelected ? 2 : 1),
                 borderRadius: BorderRadius.circular(12),
                 color: Colors.orange.withOpacity(
                   isSelected ? 0.15 : 0.05),
               ),
-              child: widget,
+              child: element,
             )
-          : widget,
+          : element,
       ),
     );
   }
@@ -526,7 +584,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
 
   Widget _buildTrigger(bool isLeft, double size) {
     final value = isLeft ? _l2 : _r2;
-    Color color = value > 0 ? Colors.orange : Colors.white24;
+    final color = value > 0 ? Colors.orange : Colors.white24;
     return GestureDetector(
       onTapDown: _editMode ? null : (_) => _onTriggerDown(isLeft),
       onTapUp: _editMode ? null : (_) => _onTriggerRelease(isLeft),
@@ -580,13 +638,13 @@ class _ControllerScreenState extends State<ControllerScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Positioned(top: 0, left: size/2 - btnSize/2,
+          Positioned(top: 0, left: size / 2 - btnSize / 2,
             child: _buildFaceBtn('triangle', '△', Colors.green, btnSize)),
-          Positioned(bottom: 0, left: size/2 - btnSize/2,
+          Positioned(bottom: 0, left: size / 2 - btnSize / 2,
             child: _buildFaceBtn('cross', '✕', Colors.blue, btnSize)),
-          Positioned(left: 0, top: size/2 - btnSize/2,
+          Positioned(left: 0, top: size / 2 - btnSize / 2,
             child: _buildFaceBtn('square', '□', Colors.pink, btnSize)),
-          Positioned(right: 0, top: size/2 - btnSize/2,
+          Positioned(right: 0, top: size / 2 - btnSize / 2,
             child: _buildFaceBtn('circle', '○', Colors.red, btnSize)),
         ],
       ),
@@ -615,7 +673,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
         child: Center(
           child: Text(label,
             style: TextStyle(color: color,
-              fontSize: size * 0.4, fontWeight: FontWeight.bold)),
+              fontSize: size * 0.4,
+              fontWeight: FontWeight.bold)),
         ),
       ),
     );
@@ -640,7 +699,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
         ),
         child: Center(
           child: Text(label,
-            style: const TextStyle(color: Colors.white, fontSize: 11)),
+            style: const TextStyle(
+              color: Colors.white, fontSize: 11)),
         ),
       ),
     );
@@ -652,13 +712,13 @@ class _ControllerScreenState extends State<ControllerScreen> {
       width: size, height: size,
       child: Stack(
         children: [
-          Positioned(top: 0, left: size/2 - btnSize/2,
+          Positioned(top: 0, left: size / 2 - btnSize / 2,
             child: _buildDpadBtn('dpad_up', '▲', btnSize)),
-          Positioned(bottom: 0, left: size/2 - btnSize/2,
+          Positioned(bottom: 0, left: size / 2 - btnSize / 2,
             child: _buildDpadBtn('dpad_down', '▼', btnSize)),
-          Positioned(left: 0, top: size/2 - btnSize/2,
+          Positioned(left: 0, top: size / 2 - btnSize / 2,
             child: _buildDpadBtn('dpad_left', '◀', btnSize)),
-          Positioned(right: 0, top: size/2 - btnSize/2,
+          Positioned(right: 0, top: size / 2 - btnSize / 2,
             child: _buildDpadBtn('dpad_right', '▶', btnSize)),
         ],
       ),
@@ -684,7 +744,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
         ),
         child: Center(
           child: Text(label,
-            style: const TextStyle(color: Colors.white, fontSize: 14)),
+            style: const TextStyle(
+              color: Colors.white, fontSize: 14)),
         ),
       ),
     );
@@ -695,16 +756,16 @@ class _ControllerScreenState extends State<ControllerScreen> {
       onPanUpdate: _editMode ? null : (details) {
         if (isLeft && !_gyroEnabled) {
           setState(() {
-            _lx = ((details.localPosition.dx - size/2) / (size/2))
+            _lx = ((details.localPosition.dx - size / 2) / (size / 2))
               .clamp(-1.0, 1.0);
-            _ly = ((details.localPosition.dy - size/2) / (size/2))
+            _ly = ((details.localPosition.dy - size / 2) / (size / 2))
               .clamp(-1.0, 1.0);
           });
         } else if (!isLeft) {
           setState(() {
-            _rx = ((details.localPosition.dx - size/2) / (size/2))
+            _rx = ((details.localPosition.dx - size / 2) / (size / 2))
               .clamp(-1.0, 1.0);
-            _ry = ((details.localPosition.dy - size/2) / (size/2))
+            _ry = ((details.localPosition.dy - size / 2) / (size / 2))
               .clamp(-1.0, 1.0);
           });
         }
