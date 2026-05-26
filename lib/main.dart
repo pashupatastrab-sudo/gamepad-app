@@ -62,7 +62,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
   double _rx = 0, _ry = 0;
   double _l2 = 0, _r2 = 0;
 
-  StreamSubscription? _gyroSub;
+  StreamSubscription? _accelSub;
   Timer? _sendTimer;
   Timer? _pingTimer;
 
@@ -122,14 +122,18 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   void _startSending() {
+    // 60fps = every ~16ms
     _sendTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
       if (_channel == null) return;
       _channel!.sink.add(jsonEncode({
         'type': 'input',
         ..._buttons,
-        'lx': _lx, 'ly': _ly,
-        'rx': _rx, 'ry': _ry,
-        'l2': _l2, 'r2': _r2,
+        'lx': double.parse(_lx.toStringAsFixed(3)),
+        'ly': double.parse(_ly.toStringAsFixed(3)),
+        'rx': double.parse(_rx.toStringAsFixed(3)),
+        'ry': double.parse(_ry.toStringAsFixed(3)),
+        'l2': _l2,
+        'r2': _r2,
       }));
     });
   }
@@ -143,27 +147,27 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   void _startSteering() {
-    _gyroSub = accelerometerEventStream().listen((event) {
+    // Use high frequency sensor updates for 60fps steering
+    _accelSub = accelerometerEventStream(
+      samplingPeriod: const Duration(milliseconds: 16),
+    ).listen((event) {
       if (!_gyroEnabled) return;
 
-      // Detect phone orientation using y axis
-      // Normal landscape: event.y near 0
-      // Rotated 180 degrees: event.y flips positive
-      final isUpsideDown = event.y > 5.0;
+      // In LANDSCAPE mode on iPhone:
+      // Tilt left/right = event.y axis (NOT event.x)
+      // event.y = 0 when flat
+      // event.y = +9.8 when tilted right (landscape)
+      // event.y = -9.8 when tilted left (landscape)
+      double raw = (event.y / 9.8).clamp(-1.0, 1.0);
 
-      double raw;
-      if (isUpsideDown) {
-        raw = (event.x / 9.8).clamp(-1.0, 1.0);
-      } else {
-        raw = (-event.x / 9.8).clamp(-1.0, 1.0);
-      }
-
-      // Apply invert toggle
+      // Apply invert
       if (_invertSteering) raw = -raw;
 
-      // Smooth it out
+      // Strong smoothing for natural steering feel
       _gyroSmoothed = _gyroSmoothed * 0.75 + raw * 0.25;
-      setState(() => _lx = _gyroSmoothed);
+
+      // Update without setState for performance
+      _lx = _gyroSmoothed;
     });
   }
 
@@ -208,7 +212,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
   void _disconnect() {
     _sendTimer?.cancel();
     _pingTimer?.cancel();
-    _gyroSub?.cancel();
+    _accelSub?.cancel();
     _wsSubscription?.cancel();
     _rumbleCooldown?.cancel();
     _channel?.sink.close();
@@ -301,21 +305,18 @@ class _ControllerScreenState extends State<ControllerScreen> {
                 child: Container(height: 4, color: _lightbarColor),
               ),
 
-              // All draggable elements
-              ..._layouts.entries.map((entry) {
-                return _buildDraggable(entry.key, entry.value, w, h);
-              }),
+              // All elements
+              ..._layouts.entries.map((entry) =>
+                _buildDraggable(entry.key, entry.value, w, h)),
 
-              // TOP CENTER BAR
+              // TOP BAR
               Positioned(
                 top: 8, left: 0, right: 0,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const SizedBox(width: 8),
-
                       // Ping
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -331,14 +332,13 @@ class _ControllerScreenState extends State<ControllerScreen> {
                             color: _pingColor, fontSize: 10)),
                       ),
                       const SizedBox(width: 6),
-
-                      // Gyro toggle
+                      // Steer toggle
                       GestureDetector(
                         onTap: () => setState(() {
                           _gyroEnabled = !_gyroEnabled;
                           if (!_gyroEnabled) {
-                            _lx = 0.0;
-                            _gyroSmoothed = 0.0;
+                            _lx = 0;
+                            _gyroSmoothed = 0;
                           }
                         }),
                         child: Container(
@@ -354,17 +354,15 @@ class _ControllerScreenState extends State<ControllerScreen> {
                                 ? Colors.green : Colors.grey),
                           ),
                           child: Text(
-                            _gyroEnabled ? '🌀 ON' : '🌀 OFF',
+                            _gyroEnabled ? '🌀 STEER ON' : '🌀 STEER OFF',
                             style: TextStyle(
                               color: _gyroEnabled
                                 ? Colors.green : Colors.grey,
-                              fontSize: 10),
-                          ),
+                              fontSize: 10)),
                         ),
                       ),
                       const SizedBox(width: 6),
-
-                      // Invert steering
+                      // Invert
                       GestureDetector(
                         onTap: () => setState(() =>
                           _invertSteering = !_invertSteering),
@@ -385,13 +383,11 @@ class _ControllerScreenState extends State<ControllerScreen> {
                             style: TextStyle(
                               color: _invertSteering
                                 ? Colors.purple : Colors.white54,
-                              fontSize: 10),
-                          ),
+                              fontSize: 10)),
                         ),
                       ),
                       const SizedBox(width: 6),
-
-                      // Edit button
+                      // Edit
                       GestureDetector(
                         onTap: () => setState(() {
                           _editMode = !_editMode;
@@ -416,13 +412,11 @@ class _ControllerScreenState extends State<ControllerScreen> {
                               color: _editMode
                                 ? Colors.orange : Colors.white,
                               fontSize: 11,
-                              fontWeight: FontWeight.bold),
-                          ),
+                              fontWeight: FontWeight.bold)),
                         ),
                       ),
                       const SizedBox(width: 6),
-
-                      // Reset (only in edit mode)
+                      // Reset
                       if (_editMode)
                         GestureDetector(
                           onTap: () => setState(() => _resetLayouts()),
@@ -440,14 +434,13 @@ class _ControllerScreenState extends State<ControllerScreen> {
                                 color: Colors.red, fontSize: 10)),
                           ),
                         ),
-
                       const SizedBox(width: 8),
                     ],
                   ),
                 ),
               ),
 
-              // Size slider when element selected
+              // Size slider
               if (_editMode && _selectedElement != null)
                 Positioned(
                   bottom: 40, left: 20, right: 20,
