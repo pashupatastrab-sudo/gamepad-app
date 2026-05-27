@@ -122,7 +122,6 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   void _startSending() {
-    // 60fps = every ~16ms
     _sendTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
       if (_channel == null) return;
       _channel!.sink.add(jsonEncode({
@@ -147,27 +146,20 @@ class _ControllerScreenState extends State<ControllerScreen> {
   }
 
   void _startSteering() {
-    // Use high frequency sensor updates for 60fps steering
     _accelSub = accelerometerEventStream(
       samplingPeriod: const Duration(milliseconds: 16),
     ).listen((event) {
       if (!_gyroEnabled) return;
 
-      // In LANDSCAPE mode on iPhone:
-      // Tilt left/right = event.y axis (NOT event.x)
-      // event.y = 0 when flat
-      // event.y = +9.8 when tilted right (landscape)
-      // event.y = -9.8 when tilted left (landscape)
+      // event.y is the correct axis for landscape tilt steering
       double raw = (event.y / 9.8).clamp(-1.0, 1.0);
-
-      // Apply invert
       if (_invertSteering) raw = -raw;
 
-      // Strong smoothing for natural steering feel
       _gyroSmoothed = _gyroSmoothed * 0.75 + raw * 0.25;
-
-      // Update without setState for performance
       _lx = _gyroSmoothed;
+
+      // Force UI to rebuild so joystick visually updates
+      if (mounted) setState(() {});
     });
   }
 
@@ -354,7 +346,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
                                 ? Colors.green : Colors.grey),
                           ),
                           child: Text(
-                            _gyroEnabled ? '🌀 STEER ON' : '🌀 STEER OFF',
+                            _gyroEnabled
+                              ? '🌀 STEER ON' : '🌀 STEER OFF',
                             style: TextStyle(
                               color: _gyroEnabled
                                 ? Colors.green : Colors.grey,
@@ -379,7 +372,8 @@ class _ControllerScreenState extends State<ControllerScreen> {
                                 ? Colors.purple : Colors.white30),
                           ),
                           child: Text(
-                            _invertSteering ? '🔄 INV ON' : '🔄 INV',
+                            _invertSteering
+                              ? '🔄 INV ON' : '🔄 INV',
                             style: TextStyle(
                               color: _invertSteering
                                 ? Colors.purple : Colors.white54,
